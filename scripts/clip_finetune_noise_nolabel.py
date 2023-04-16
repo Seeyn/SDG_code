@@ -113,8 +113,6 @@ def main():
         else:
             print('Warning: opt checkpoint %s not found' % opt_checkpoint)
 
-
-
     print("training classifier model...")
 
     import clip
@@ -125,7 +123,7 @@ def main():
 
     def forward_backward_log(data_loader, prefix="train", step=0):
         batch, batch2 = next(data_loader)
-
+        print(batch2)
         batch = to_cuda(batch)
         batch2 = to_cuda(batch2)
         # Noisy images
@@ -235,7 +233,6 @@ def split_microbatches(microbatch, *args):
     else:
         for i in range(0, bs, microbatch):
             yield tuple(x[i : i + microbatch] if x is not None else None for x in args)
-
 
 if __name__ == "__main__":
     main()

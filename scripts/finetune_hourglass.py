@@ -32,7 +32,7 @@ from sgd.script_util import (
 from sgd.train_util import parse_resume_step_from_filename, log_loss_dict
 from sgd.misc import set_random_seed
 from sgd.misc import to_cuda
-
+from sdg.faceparser import FaceParseNet50
 
 def main():
     args = create_argparser().parse_args()
@@ -50,10 +50,21 @@ def main():
     world_size = get_world_size()
 
     print("creating model and diffusion...")
-    model, diffusion = create_clip_and_diffusion(
+    _, diffusion = create_clip_and_diffusion(
         args, **args_to_dict(args, classifier_and_diffusion_defaults().keys())
     )
-    model.to('cuda')
+    face_p = FaceParseNet50(num_classes=19, pretrained=False)
+    face_p.load_state_dict(th.load('./38_G.pth'))
+    face_p.eval()
+    face_p.cuda()
+    model_ = face_p
+
+    face_p = FaceParseNet50(num_classes=19, pretrained=False)
+    face_p.load_state_dict(th.load('./38_G.pth'))
+    face_p.cuda()
+    model = face_p
+
+
     if args.noised:
         schedule_sampler = create_named_schedule_sampler(
             args.schedule_sampler, diffusion
@@ -73,19 +84,19 @@ def main():
             scaler = th.cuda.amp.GradScaler(init_scale=65536.0, growth_factor=2**0.001, backoff_factor=0.5, growth_interval=1, enabled=True)
 
 
-    use_ddp = th.cuda.is_available() and th.distributed.is_available() and dist.is_initialized()
-    if use_ddp:
-        ddp_model = DDP(
-            model,
-            device_ids=[args.local_rank],
-            output_device=args.local_rank,
-            broadcast_buffers=False,
-            bucket_cap_mb=128,
-            find_unused_parameters=False,
-        )
-    else:
-        print("Single GPU Training without DistributedDataParallel. ")
-        ddp_model = model
+    # use_ddp = th.cuda.is_available() and th.distributed.is_available() and dist.is_initialized()
+    # if use_ddp:
+    #     ddp_model = DDP(
+    #         model,
+    #         device_ids=[args.local_rank],
+    #         output_device=args.local_rank,
+    #         broadcast_buffers=False,
+    #         bucket_cap_mb=128,
+    #         find_unused_parameters=False,
+    #     )
+    # else:
+    #     print("Single GPU Training without DistributedDataParallel. ")
+    #     ddp_model = model
 
     print("creating data loader...")
     args.return_text = False
@@ -115,11 +126,7 @@ def main():
 
     print("training classifier model...")
 
-    import clip
-    clip_pretrained, _ = clip.load('RN50x16', jit=False)
-    clip_pretrained = clip_pretrained.float()
-    clip_pretrained.eval()
-    clip_pretrained = clip_pretrained.cuda()
+    
 
     def forward_backward_log(data_loader, prefix="train", step=0):
         batch, batch2 = next(data_loader)
@@ -133,34 +140,16 @@ def main():
         else:
             t = th.zeros(batch.shape[0], dtype=th.long, device='cuda')
 
-        ground_truth = th.arange(batch.shape[0] * world_size, dtype=th.long, device='cuda')
+       
         for i, (sub_batch, sub_batch2, sub_t) in enumerate(
             split_microbatches(args.microbatch, batch, batch2, t)
         ):
             with th.cuda.amp.autocast(args.use_fp16):
-                with th.no_grad():
-                    sub_labels = clip_pretrained.encode_image(sub_batch2)
-                if args.structure == 'classifier':
-                    image_features = ddp_model(sub_batch, timesteps=sub_t)
-                    text_features = sub_labels
-                else:
-                    image_features, text_features = ddp_model(sub_batch, sub_labels, sub_t)
-
-                image_features = image_features / image_features.norm(dim=-1, keepdim=True)
-                text_features = text_features / text_features.norm(dim=-1, keepdim=True)
+                with th.nograd():
+                    gt_mask = model_(sub_batch2)
+                pre_mask = model(sub_batch)
                 losses = {}
-
-                image_features = all_gather_with_gradient(image_features)
-                text_features = all_gather_with_gradient(text_features)
-                logits_per_image = 100.0 * image_features @ text_features.t()
-                logits_per_text = logits_per_image.t()
-
-                loss_i2t = F.cross_entropy(logits_per_image, ground_truth, reduction='none')
-                loss_t2i = F.cross_entropy(logits_per_text, ground_truth, reduction='none')
-                loss = loss_i2t + loss_t2i
-                losses[f"{prefix}_loss_i2t"] = loss_i2t.detach()
-                losses[f"{prefix}_loss_t2i"] = loss_t2i.detach()
-            
+                loss = F.mse_loss(gt_mask,pre_mask)
 
             losses[f"{prefix}_loss"] = loss.detach()
  

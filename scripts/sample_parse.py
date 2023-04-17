@@ -33,6 +33,10 @@ import clip
 from sdg.faceparser import FaceParseNet50
 
 def main():
+
+    gt_sr_mask = {}
+    name_ = None
+
     time0 = time.time()
     args = create_argparser().parse_args()
     set_affinity(args.local_rank)
@@ -62,8 +66,9 @@ def main():
     clip_ft = clip_ft.cuda()
 
     face_p = FaceParseNet50(num_classes=19, pretrained=False)
-    face_p.load_state_dict(torch.load('../38_G.pth'))
+    face_p.load_state_dict(torch.load('./38_G.pth'))
     face_p.eval()
+    face_p.cuda()
 
     # define image list
     if args.image_weight == 0:
@@ -80,12 +85,14 @@ def main():
         with th.enable_grad():
             x_in = x.detach().requires_grad_(True)
             image_features = clip_ft.encode_image_list(x_in, t)
-            print(x_in.shape)
-            loss_mask = F.mse_loss(face_p(x_in),y)
+            #print(x_in.shape)
+            out = face_p(x_in)[0][-1]
+            gt_sr_mask[name_].append(out)
+            loss_mask = F.mse_loss(out,y)
 
             loss_img = image_loss(image_features, target_img_features, args)
-           
-            total_guidance =  loss_mask + loss_img * args.image_weight
+            print(loss_mask.sum(),loss_img.sum()) 
+            total_guidance =  loss_mask*10 #+  loss_img * args.image_weight
 
             return th.autograd.grad(total_guidance.sum(), x_in)[0]
 
@@ -98,13 +105,17 @@ def main():
             model_kwargs = load_ref_data(args, imgs[img_cnt])
         else:
             model_kwargs = {}
-            model_kwargs['y'] = face_p(imgs[img_cnt])
-            model_kwargs = {k: v.to('cuda') for k, v in model_kwargs.items()}
-            if args.image_weight == 0 and args.text_weight == 0:
-                cond_fn = None
-            else:
-                cond_fn = cond_fn_sdg
-            with th.cuda.amp.autocast(True):
+        model_kwargs['y'] = face_p(model_kwargs["ref_img"].cuda())[0][-1]
+        model_kwargs = {k: v.to('cuda') for k, v in model_kwargs.items()}
+        name_ =os.path.basename(imgs[img_cnt]).split('.')[0]
+        gt_sr_mask[name_] = []
+        gt_sr_mask[name_].append(model_kwargs['y'])
+
+        if args.image_weight == 0 and args.text_weight == 0:
+            cond_fn = None
+        else:
+            cond_fn = cond_fn_sdg
+        with th.cuda.amp.autocast(True):
                 sample = diffusion.p_sample_loop(
                     model,
                     (args.batch_size, 3, args.image_size, args.image_size),
@@ -115,14 +126,14 @@ def main():
                     device='cuda',
                 )
 
-            for i in range(args.batch_size):
+        for i in range(args.batch_size):
 
-                out_folder = '%05d_%05d_%s_%s' % (img_cnt,0 , os.path.basename(imgs[img_cnt]).split('.')[0], 'parse')
+            out_folder = '%05d_%05d_%s_%s' % (img_cnt,0 , os.path.basename(imgs[img_cnt]).split('.')[0], 'parse')
 
-                out_path = os.path.join(args.logdir, out_folder,
+            out_path = os.path.join(args.logdir, out_folder,
                                         f"{str(count * args.batch_size + i).zfill(5)}.png")
-                os.makedirs(os.path.dirname(out_path), exist_ok=True)
-                utils.save_image(
+            os.makedirs(os.path.dirname(out_path), exist_ok=True)
+            utils.save_image(
                     sample[i].unsqueeze(0),
                     out_path,
                     nrow=1,
@@ -130,10 +141,10 @@ def main():
                     range=(-1, 1),
                 )
 
-            count += 1
-            print(f"created {count * args.batch_size} samples")
-            print(time.time() - time0)
-
+        count += 1
+        print(f"created {count * args.batch_size} samples")
+        print(time.time() - time0)
+        np.save('masks',gt_sr_mask)
     print("sampling complete")
 
 

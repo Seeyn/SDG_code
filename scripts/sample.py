@@ -47,6 +47,7 @@ def main():
         tb_log = make_logging_dir(args.logdir, no_tb=True)
 
     print("creating model...")
+    print(args.text_cond)
     model, diffusion = create_model_and_diffusion(
         **args_to_dict(args, model_and_diffusion_defaults().keys())
     )

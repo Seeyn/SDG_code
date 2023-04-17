@@ -155,7 +155,7 @@ class ImageDataset(Dataset):
         with bf.BlobFile(path, "rb") as f:
             pil_image = Image.open(f)
             pil_image.load()
-        pil_image = pil_image.convert("RGB")
+        pil_image = pil_image.convert("RGB").resize((self.resolution,self.resolution))
 
         if self.random_crop:
             arr = random_crop_arr(pil_image, self.resolution)

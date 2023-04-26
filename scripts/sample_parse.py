@@ -66,10 +66,17 @@ def main():
     clip_ft = clip_ft.cuda()
 
     face_p = FaceParseNet50(num_classes=19, pretrained=False)
-    face_p.load_state_dict(torch.load('./38_G.pth'))
+    face_p.load_state_dict(torch.load('/home/tangb_lab/cse30013027/lzl/SDG_code/logs/tune_hourglass/model000500.pt'))
     face_p.eval()
     face_p.cuda()
 
+    face_p_ori = FaceParseNet50(num_classes=19, pretrained=False)
+    face_p_ori.load_state_dict(torch.load('/home/tangb_lab/cse30013027/lzl/SDG_code/38_G.pth'))
+    face_p_ori.eval()
+    face_p_ori.cuda()
+
+    
+    cri  = th.nn.MSELoss(reduction='mean')
     # define image list
     if args.image_weight == 0:
         imgs = [None]
@@ -88,11 +95,12 @@ def main():
             #print(x_in.shape)
             out = face_p(x_in)[0][-1]
             gt_sr_mask[name_].append(out)
-            loss_mask = F.mse_loss(out,y)
+            #print(y.shape,out.shape)
+            loss_mask = cri(out,y)
 
             loss_img = image_loss(image_features, target_img_features, args)
-            print(loss_mask.sum(),loss_img.sum()) 
-            total_guidance =  loss_mask*10 #+  loss_img * args.image_weight
+            #print(loss_mask.sum(),loss_img.sum()) 
+            total_guidance =  0.01*loss_mask #+  loss_img.mean() * args.image_weight
 
             return th.autograd.grad(total_guidance.sum(), x_in)[0]
 
@@ -105,7 +113,7 @@ def main():
             model_kwargs = load_ref_data(args, imgs[img_cnt])
         else:
             model_kwargs = {}
-        model_kwargs['y'] = face_p(model_kwargs["ref_img"].cuda())[0][-1]
+        model_kwargs['y'] = face_p_ori(model_kwargs["ref_img"].cuda())[0][-1]
         model_kwargs = {k: v.to('cuda') for k, v in model_kwargs.items()}
         name_ =os.path.basename(imgs[img_cnt]).split('.')[0]
         gt_sr_mask[name_] = []

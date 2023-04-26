@@ -15,23 +15,23 @@ from torch.nn.parallel.distributed import DistributedDataParallel as DDP
 from torch.optim import AdamW
 from torch.utils import tensorboard
 
-from sgd.parser import create_argparser
-from sgd.logging import init_logging, make_logging_dir
-from sgd.distributed import init_dist, is_master, get_world_size
-from sgd.distributed import master_only_print as print
-from sgd.distributed import dist_all_gather_tensor, all_gather_with_gradient
-from sgd.gpu_affinity import set_affinity
-from sgd.image_datasets import load_data
-from sgd.resample import create_named_schedule_sampler
-from sgd.script_util import (
+from sdg.parser import create_argparser
+from sdg.logging import init_logging, make_logging_dir
+from sdg.distributed import init_dist, is_master, get_world_size
+from sdg.distributed import master_only_print as print
+from sdg.distributed import dist_all_gather_tensor, all_gather_with_gradient
+from sdg.gpu_affinity import set_affinity
+from sdg.image_datasets import load_data
+from sdg.resample import create_named_schedule_sampler
+from sdg.script_util import (
     add_dict_to_argparser,
     args_to_dict,
     classifier_and_diffusion_defaults,
     create_clip_and_diffusion,
 )
-from sgd.train_util import parse_resume_step_from_filename, log_loss_dict
-from sgd.misc import set_random_seed
-from sgd.misc import to_cuda
+from sdg.train_util import parse_resume_step_from_filename, log_loss_dict
+from sdg.misc import set_random_seed
+from sdg.misc import to_cuda
 from sdg.faceparser import FaceParseNet50
 
 def main():
@@ -132,8 +132,10 @@ def main():
         batch, batch2 = next(data_loader)
         print(batch2)
         batch = to_cuda(batch)
-        batch2 = to_cuda(batch2)
+        batch2 = batch.detach().clone()
+        #batch2 = to_cuda(batch2)
         # Noisy images
+        cri = th.nn.MSELoss(reduction='none')
         if args.noised:
             t, _ = schedule_sampler.sample(batch.shape[0], 'cuda')
             batch = diffusion.q_sample(batch, t)
@@ -145,12 +147,13 @@ def main():
             split_microbatches(args.microbatch, batch, batch2, t)
         ):
             with th.cuda.amp.autocast(args.use_fp16):
-                with th.nograd():
-                    gt_mask = model_(sub_batch2)
-                pre_mask = model(sub_batch)
+                with th.no_grad():
+                    gt_mask = model_(sub_batch2)[0][-1]
+                pre_mask = model(sub_batch)[0][-1]
+#                print(pre_mask.shape,gt_mask.shape)
                 losses = {}
-                loss = F.mse_loss(gt_mask,pre_mask)
-
+                loss = cri(gt_mask,pre_mask)
+#                print(loss.shape,sub_t.shape)
             losses[f"{prefix}_loss"] = loss.detach()
  
             log_loss_dict(diffusion, sub_t, losses, tb_log, step)

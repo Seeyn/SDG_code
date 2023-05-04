@@ -66,7 +66,7 @@ def main():
     clip_ft = clip_ft.cuda()
 
     face_p = FaceParseNet50(num_classes=19, pretrained=False)
-    face_p.load_state_dict(torch.load('/home/tangb_lab/cse30013027/lzl/SDG_code/logs/tune_hourglass/model000500.pt'))
+    face_p.load_state_dict(torch.load('/home/tangb_lab/cse30013027/lzl/SDG_code/logs/tune_hourglass_x0/model000500.pt'))
     face_p.eval()
     face_p.cuda()
 
@@ -86,21 +86,21 @@ def main():
 
     def cond_fn_sdg(x, t, y, **kwargs):
         assert y is not None
-        with th.no_grad():
-            target_img_noised = diffusion.q_sample(kwargs['ref_img'], t, tscale1000=True)
-            target_img_features = clip_ft.encode_image_list(target_img_noised, t)
+        #with th.no_grad():
+            #target_img_noised = diffusion.q_sample(kwargs['ref_img'], t, tscale1000=True)
+            #target_img_features = clip_ft.encode_image_list(target_img_noised, t)
         with th.enable_grad():
             x_in = x.detach().requires_grad_(True)
-            image_features = clip_ft.encode_image_list(x_in, t)
+            #image_features = clip_ft.encode_image_list(x_in, t)
             #print(x_in.shape)
             out = face_p(x_in)[0][-1]
             gt_sr_mask[name_].append(out)
             #print(y.shape,out.shape)
             loss_mask = cri(out,y)
 
-            loss_img = image_loss(image_features, target_img_features, args)
-            #print(loss_mask.sum(),loss_img.sum()) 
-            total_guidance =  0.01*loss_mask #+  loss_img.mean() * args.image_weight
+            #loss_img = image_loss(image_features, target_img_features, args)
+            print(loss_mask.sum()) 
+            total_guidance =  -loss_mask #+  loss_img.mean() * args.image_weight
 
             return th.autograd.grad(total_guidance.sum(), x_in)[0]
 
@@ -152,7 +152,7 @@ def main():
         count += 1
         print(f"created {count * args.batch_size} samples")
         print(time.time() - time0)
-        np.save('masks',gt_sr_mask)
+        np.save('masks_x0',gt_sr_mask)
     print("sampling complete")
 
 

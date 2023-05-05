@@ -53,13 +53,19 @@ def main():
         args, **args_to_dict(args, classifier_and_diffusion_defaults().keys())
     )
     face_p = ResNetArcFace('IRBlock', [2,2,2,2], use_se=False)
-    face_p.load_state_dict(th.load('./arcface_resnet18.pth'))
+    weights = th.load('./arcface_resnet18.pth')
+    weights_dict = {}
+    for k, v in weights.items():
+        new_k = k.replace('module.', '') if 'module' in k else k
+        weights_dict[new_k] = v
+
+    face_p.load_state_dict(weights_dict)
     face_p.eval()
     face_p.cuda()
     model_ = face_p
 
     face_p = ResNetArcFace('IRBlock', [2,2,2,2], use_se=False)
-    face_p.load_state_dict(th.load('./arcface_resnet18.pth'))
+    face_p.load_state_dict(weights_dict)
     face_p.cuda()
     model = face_p
 
@@ -126,7 +132,7 @@ def main():
     print("training classifier model...")
 
     
-    def gray_resize_for_identity(self, out, size=128):
+    def gray_resize_for_identity(out, size=128):
         out_gray = (0.2989 * out[:, 0, :, :] + 0.5870 * out[:, 1, :, :] + 0.1140 * out[:, 2, :, :])
         out_gray = out_gray.unsqueeze(1)
         out_gray = F.interpolate(out_gray, (size, size), mode='bilinear', align_corners=False)

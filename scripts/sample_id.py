@@ -30,7 +30,7 @@ from sdg.image_datasets import _list_image_files_recursively
 from torchvision import utils
 import math
 import clip
-from sdg.faceparser import FaceParseNet50
+from sdg.face_id import ResNetArcFace
 
 def main():
 
@@ -65,17 +65,29 @@ def main():
     clip_ft.eval()
     clip_ft = clip_ft.cuda()
 
-    face_p = FaceParseNet50(num_classes=19, pretrained=False)
-    face_p.load_state_dict(torch.load('/home/tangb_lab/cse30013027/lzl/SDG_code/logs/tune_hourglass_x0/model000500.pt'))
+
+
+    face_p = ResNetArcFace('IRBlock', [2,2,2,2], use_se=False)
+    weights = th.load('/home/tangb_lab/cse30013027/lzl/SDG_code/logs/tune_id/model000500.pt')
+    weights_dict = {}
+    for k, v in weights.items():
+        new_k = k.replace('module.', '') if 'module' in k else k
+        weights_dict[new_k] = v
+
+    face_p.load_state_dict(weights_dict)
     face_p.eval()
     face_p.cuda()
 
-    face_p_ori = FaceParseNet50(num_classes=19, pretrained=False)
-    face_p_ori.load_state_dict(torch.load('/home/tangb_lab/cse30013027/lzl/SDG_code/38_G.pth'))
+    face_p_ori = ResNetArcFace('IRBlock', [2,2,2,2], use_se=False)
+    weights = th.load('./arcface_resnet18.pth')
+    weights_dict = {}
+    for k, v in weights.items():
+        new_k = k.replace('module.', '') if 'module' in k else k
+        weights_dict[new_k] = v
+    face_p_ori.load_state_dict(weights_dict)
     face_p_ori.eval()
     face_p_ori.cuda()
 
-    
     cri  = th.nn.MSELoss(reduction='mean')
     # define image list
     if args.image_weight == 0:
@@ -83,6 +95,12 @@ def main():
     else:
         imgs = _list_image_files_recursively(args.data_dir)
         imgs = sorted(imgs)
+    
+    def gray_resize_for_identity(out, size=128):
+        out_gray = (0.2989 * out[:, 0, :, :] + 0.5870 * out[:, 1, :, :] + 0.1140 * out[:, 2, :, :])
+        out_gray = out_gray.unsqueeze(1)
+        out_gray = F.interpolate(out_gray, (size, size), mode='bilinear', align_corners=False)
+        return out_gray
 
     def cond_fn_sdg(x, t, y, **kwargs):
         assert y is not None
@@ -93,14 +111,14 @@ def main():
             x_in = x.detach().requires_grad_(True)
             #image_features = clip_ft.encode_image_list(x_in, t)
             #print(x_in.shape)
-            out = face_p(x_in)[0][-1]
+            out = face_p(gray_resize_for_identity(x_in))
             gt_sr_mask[name_].append(out)
             #print(y.shape,out.shape)
             loss_mask = cri(out,y)
 
             #loss_img = image_loss(image_features, target_img_features, args)
             print(loss_mask.sum()) 
-            total_guidance =  -loss_mask #+  loss_img.mean() * args.image_weight
+            total_guidance =  -1000*loss_mask #+  loss_img.mean() * args.image_weight
 
             return th.autograd.grad(total_guidance.sum(), x_in)[0]
 
@@ -113,7 +131,7 @@ def main():
             model_kwargs = load_ref_data(args, imgs[img_cnt])
         else:
             model_kwargs = {}
-        model_kwargs['y'] = face_p_ori(model_kwargs["ref_img"].cuda())[0][-1]
+        model_kwargs['y'] = face_p_ori(gray_resize_for_identity(model_kwargs["ref_img"].cuda()))
         model_kwargs = {k: v.to('cuda') for k, v in model_kwargs.items()}
         name_ =os.path.basename(imgs[img_cnt]).split('.')[0]
         gt_sr_mask[name_] = []
@@ -152,7 +170,7 @@ def main():
         count += 1
         print(f"created {count * args.batch_size} samples")
         print(time.time() - time0)
-        np.save('masks_x0',gt_sr_mask)
+        np.save('id_xt_wovar',gt_sr_mask)
     print("sampling complete")
 
 

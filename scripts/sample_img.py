@@ -99,7 +99,7 @@ def main():
 
             #loss_img = image_loss(image_features, target_img_features, args)
             print(loss_mask.sum()) 
-            total_guidance =  -1000*loss_mask #+  loss_img.mean() * args.image_weight
+            total_guidance =  -10000*loss_mask #+  loss_img.mean() * args.image_weight
 
             return th.autograd.grad(total_guidance.sum(), x_in)[0]
 

@@ -467,6 +467,8 @@ class GaussianDiffusion:
         model_kwargs=None,
         device=None,
         progress=False,
+        resizers=None,
+        range_t=0,
     ):
         """
         Generate samples from the model.
@@ -498,8 +500,11 @@ class GaussianDiffusion:
             model_kwargs=model_kwargs,
             device=device,
             progress=progress,
+            resizers=resizers,
+            range_t=range_t,
         ):
             final = sample
+
         return final["sample"]
 
     def p_sample_loop_progressive(
@@ -513,6 +518,8 @@ class GaussianDiffusion:
         model_kwargs=None,
         device=None,
         progress=False,
+        resizers=None,
+        range_t=0,
     ):
         """
         Generate samples from the model and yield intermediate samples from
@@ -537,6 +544,9 @@ class GaussianDiffusion:
 
             indices = tqdm(indices)
 
+        if resizers is not None:
+            down, up = resizers
+
         for i in indices:
             t = th.tensor([i] * shape[0], device=device)
             with th.no_grad():
@@ -549,6 +559,13 @@ class GaussianDiffusion:
                     cond_fn=cond_fn,
                     model_kwargs=model_kwargs,
                 )
+
+                #### ILVR ####
+                if resizers is not None:
+                    if i > range_t:
+                        out["sample"] = out["sample"] - up(down(out["sample"])) + up(
+                            down(self.q_sample(model_kwargs["ref_img"], t, th.randn(*shape, device=device))))
+
                 yield out
                 img = out["sample"]
 

@@ -66,6 +66,26 @@ def main():
     clip_ft = clip_ft.cuda()
 
 
+    face_p = ResNetArcFace('IRBlock', [2,2,2,2], use_se=False)
+    weights = th.load('/home/tangb_lab/cse30013027/lzl/SDG_code/logs/tune_id/model000500.pt')
+    weights_dict = {}
+    for k, v in weights.items():
+        new_k = k.replace('module.', '') if 'module' in k else k
+        weights_dict[new_k] = v
+
+    face_p.load_state_dict(weights_dict)
+    face_p.eval()
+    face_p.cuda()
+
+    face_p_ori = ResNetArcFace('IRBlock', [2,2,2,2], use_se=False)
+    weights = th.load('./arcface_resnet18.pth')
+    weights_dict = {}
+    for k, v in weights.items():
+        new_k = k.replace('module.', '') if 'module' in k else k
+        weights_dict[new_k] = v
+    face_p_ori.load_state_dict(weights_dict)
+    face_p_ori.eval()
+    face_p_ori.cuda()
 
     
 
@@ -86,8 +106,8 @@ def main():
     def cond_fn_sdg(x, t, y, **kwargs):
         assert y is not None
         #with th.no_grad():
-            #target_img_noised = diffusion.q_sample(kwargs['ref_img'], t, tscale1000=True)
-            #target_img_features = clip_ft.encode_image_list(target_img_noised, t)
+        #    target_img_noised = diffusion.q_sample(kwargs['ref_img'], t, tscale1000=True)
+        #    target_img_features = clip_ft.encode_image_list(target_img_noised, t)
         with th.enable_grad():
             x_in = x.detach().requires_grad_(True)
             #image_features = clip_ft.encode_image_list(x_in, t)
@@ -96,17 +116,17 @@ def main():
             gt_sr_mask[name_].append(out)
             #print(y.shape,out.shape)
             loss_mask = cri(out,y)
-
+            loss_id = cri(face_p(gray_resize_for_identity(x_in)),face_p_ori(gray_resize_for_identity(y)))
             #loss_img = image_loss(image_features, target_img_features, args)
             print(loss_mask.sum()) 
-            total_guidance =  -10000*loss_mask #+  loss_img.mean() * args.image_weight
+            total_guidance =  -10000*loss_mask #- 5000*loss_id #+loss_img.mean() * args.image_weight
 
             return th.autograd.grad(total_guidance.sum(), x_in)[0]
 
 
     print("creating samples...")
     count = 0
-    for img_cnt in range(len(imgs)):
+    for img_cnt in range(2):
         if imgs[img_cnt] is not None:
             print("loading data...")
             model_kwargs = load_ref_data(args, imgs[img_cnt])
@@ -131,6 +151,7 @@ def main():
                     model_kwargs=model_kwargs,
                     cond_fn=cond_fn,
                     device='cuda',
+                    range_t=0
                 )
 
         for i in range(args.batch_size):
@@ -151,7 +172,7 @@ def main():
         count += 1
         print(f"created {count * args.batch_size} samples")
         print(time.time() - time0)
-        np.save('id_xt_wovar',gt_sr_mask)
+        #np.save('img_xt_wovar',gt_sr_mask)
     print("sampling complete")
 
 

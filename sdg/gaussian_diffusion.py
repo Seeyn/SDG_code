@@ -450,8 +450,8 @@ class GaussianDiffusion:
         )  # no noise when t == 0
         if cond_fn is not None:
             out["mean"] = self.condition_mean(
-                cond_fn, out, x, t, model_kwargs=model_kwargs
-                #cond_fn, out, out["pred_xstart"], t, model_kwargs=model_kwargs
+                #cond_fn, out, x, t, model_kwargs=model_kwargs
+                cond_fn, out, out["pred_xstart"], t, model_kwargs=model_kwargs
             )
         sample = out["mean"] + nonzero_mask * th.exp(0.5 * out["log_variance"]) * noise
         return {"sample": sample, "pred_xstart": out["pred_xstart"]}
@@ -550,7 +550,8 @@ class GaussianDiffusion:
         for i in indices:
             t = th.tensor([i] * shape[0], device=device)
             with th.no_grad():
-                out = self.p_sample(
+                if i > range_t:
+                    out = self.p_sample(
                     model,
                     img,
                     t,
@@ -558,7 +559,18 @@ class GaussianDiffusion:
                     denoised_fn=denoised_fn,
                     cond_fn=cond_fn,
                     model_kwargs=model_kwargs,
-                )
+                    )
+                else:
+                    out = self.p_sample(
+                    model,
+                    img,
+                    t,
+                    clip_denoised=clip_denoised,
+                    denoised_fn=denoised_fn,
+                    cond_fn=None,
+                    model_kwargs=model_kwargs,
+                    )
+
 
                 #### ILVR ####
                 if resizers is not None:

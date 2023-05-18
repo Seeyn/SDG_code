@@ -99,19 +99,19 @@ def main():
 
             #loss_img = image_loss(image_features, target_img_features, args)
             print(loss_mask.sum()) 
-            total_guidance =  -1000*loss_mask #+  loss_img.mean() * args.image_weight
+            total_guidance =  0*loss_mask #+  loss_img.mean() * args.image_weight
 
             return th.autograd.grad(total_guidance.sum(), x_in)[0]
-    
+    down_ = 2
     shape = (args.batch_size, 3, args.image_size, args.image_size)
-    shape_d = (args.batch_size, 3, int(args.image_size / args.down_N), int(args.image_size / args.down_N))
-    down = Resizer(shape, 1 / args.down_N).to(next(model.parameters()).device)
-    up = Resizer(shape_d, args.down_N).to(next(model.parameters()).device)
+    shape_d = (args.batch_size, 3, int(args.image_size / down_), int(args.image_size / down_))
+    down = Resizer(shape, 1 / down_).to(next(model.parameters()).device)
+    up = Resizer(shape_d, down_).to(next(model.parameters()).device)
     resizers = (down, up)
 
     print("creating samples...")
     count = 0
-    for img_cnt in range(len(imgs)):
+    for img_cnt in range(2):
         if imgs[img_cnt] is not None:
             print("loading data...")
             model_kwargs = load_ref_data(args, imgs[img_cnt])
@@ -134,10 +134,10 @@ def main():
                     noise=None,
                     clip_denoised=args.clip_denoised,
                     model_kwargs=model_kwargs,
-                    cond_fn=None,
+                    cond_fn=cond_fn_sdg,
                     device='cuda',
                     resizers=resizers,
-                    range_t=20
+                    range_t=5
                 )
 
         for i in range(args.batch_size):
@@ -158,7 +158,7 @@ def main():
         count += 1
         print(f"created {count * args.batch_size} samples")
         print(time.time() - time0)
-        np.save('id_xt_wovar',gt_sr_mask)
+        #np.save('ilvr_20_2down',gt_sr_mask)
     print("sampling complete")
 
 

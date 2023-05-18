@@ -32,6 +32,7 @@ import math
 import clip
 from sdg.face_id import ResNetArcFace
 from resizer import Resizer
+from sdg.faceparser import FaceParseNet50
 
 def main():
 
@@ -61,34 +62,42 @@ def main():
     )
     model.to('cuda')
     model.eval()
-    clip_ft = CLIP_gd(args)
-    clip_ft.load_state_dict(th.load(args.clip_path, map_location='cpu'))
-    clip_ft.eval()
-    clip_ft = clip_ft.cuda()
+    
 
+    id_extract = ResNetArcFace('IRBlock', [2,2,2,2], use_se=False)
+    weights = th.load('./arcface_resnet18.pth')
+    weights_dict = {}
+    for k, v in weights.items():
+        new_k = k.replace('module.', '') if 'module' in k else k
+        weights_dict[new_k] = v
 
-    face_p = ResNetArcFace('IRBlock', [2,2,2,2], use_se=False)
+    id_extract.load_state_dict(weights_dict)
+    id_extract.eval()
+    id_extract.cuda()
+    
+
+    id_extract_wnoise = ResNetArcFace('IRBlock', [2,2,2,2], use_se=False)
     weights = th.load('/home/tangb_lab/cse30013027/lzl/SDG_code/logs/tune_id/model000500.pt')
     weights_dict = {}
     for k, v in weights.items():
         new_k = k.replace('module.', '') if 'module' in k else k
         weights_dict[new_k] = v
 
-    face_p.load_state_dict(weights_dict)
-    face_p.eval()
-    face_p.cuda()
+    id_extract_wnoise.load_state_dict(weights_dict)
+    id_extract_wnoise.eval()
+    id_extract_wnoise.cuda()
 
-    face_p_ori = ResNetArcFace('IRBlock', [2,2,2,2], use_se=False)
-    weights = th.load('./arcface_resnet18.pth')
-    weights_dict = {}
-    for k, v in weights.items():
-        new_k = k.replace('module.', '') if 'module' in k else k
-        weights_dict[new_k] = v
-    face_p_ori.load_state_dict(weights_dict)
-    face_p_ori.eval()
-    face_p_ori.cuda()
 
-    
+    shape_extract_wnoise = FaceParseNet50(num_classes=19, pretrained=False)
+    shape_extract_wnoise.load_state_dict(torch.load('/home/tangb_lab/cse30013027/lzl/SDG_code/logs/tune_hourglass_x0/model000500.pt'))
+    shape_extract_wnoise.eval()
+    shape_extract_wnoise.cuda()
+
+    shape_extract = FaceParseNet50(num_classes=19, pretrained=False)
+    shape_extract.load_state_dict(torch.load('/home/tangb_lab/cse30013027/lzl/SDG_code/38_G.pth'))
+    shape_extract.eval()
+    shape_extract.cuda()
+
 
     cri  = th.nn.MSELoss(reduction='mean')
     # define image list
@@ -106,18 +115,17 @@ def main():
 
     def cond_fn_sdg(x, t, y, **kwargs):
         assert y is not None
-        #with th.no_grad():
-        #    target_img_noised = diffusion.q_sample(kwargs['ref_img'], t, tscale1000=True)
-        #    target_img_features = clip_ft.encode_image_list(target_img_noised, t)
+
         with th.enable_grad():
             x_in = x.detach().requires_grad_(True)
             #image_features = clip_ft.encode_image_list(x_in, t)
             #print(x_in.shape)
             out = x_in
-            gt_sr_mask[name_].append(out)
+            # gt_sr_mask[name_].append(out)
             #print(y.shape,out.shape)
             loss_mask = cri(out,y)
-            loss_id = cri(face_p(gray_resize_for_identity(x_in)),face_p_ori(gray_resize_for_identity(y)))
+            loss_id = cri(id_extract_wnoise(gray_resize_for_identity(x_in)),id_extract(gray_resize_for_identity(y)))
+            loss_shape = cri(shape_extract_wnoise(x_in)[0][-1],shape_extract(y)[0][-1])
             #loss_img = image_loss(image_features, target_img_features, args)
             print(loss_mask.sum()) 
             total_guidance =  -10000*loss_mask #- 5000*loss_id #+loss_img.mean() * args.image_weight
@@ -133,6 +141,12 @@ def main():
             model_kwargs = load_ref_data(args, imgs[img_cnt])
         else:
             model_kwargs = {}
+
+        low_res = F.interpolate(model_kwargs["ref_img"],(16,16), mode='bilinear', align_corners=False) 
+        low_res = low_res.to(torch.uint8)
+        low_res = low_res.to(torch.float32)
+        model_kwargs["ref_img"] = F.interpolate(low_res,(256,256), mode='bilinear', align_corners=False) 
+
         model_kwargs['y'] = model_kwargs["ref_img"].cuda()
         model_kwargs = {k: v.to('cuda') for k, v in model_kwargs.items()}
         name_ =os.path.basename(imgs[img_cnt]).split('.')[0]
